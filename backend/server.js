@@ -21,8 +21,19 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 const AIRTABLE_AUTH_URL = "https://airtable.com/oauth2/v1/authorize";
 const AIRTABLE_TOKEN_URL = "https://airtable.com/oauth2/v1/token";
 
-// Store state tokens temporarily (in production, use Redis or database)
+// Store state and PKCE tokens temporarily (in production, use Redis or database)
 const stateStore = new Map();
+
+// PKCE helper functions
+function generateCodeVerifier() {
+  // Generate random 64-byte string, base64url encoded (86 chars)
+  return crypto.randomBytes(64).toString("base64url");
+}
+
+function generateCodeChallenge(verifier) {
+  // SHA256 hash of verifier, base64url encoded
+  return crypto.createHash("sha256").update(verifier).digest("base64url");
+}
 
 // Health check
 app.get("/", (req, res) => {
@@ -37,8 +48,15 @@ app.get("/auth/airtable", (req, res) => {
   // Generate random state for CSRF protection
   const state = crypto.randomBytes(32).toString("hex");
   
-  // Store state with timestamp (expires in 10 minutes)
-  stateStore.set(state, { createdAt: Date.now() });
+  // Generate PKCE code_verifier and code_challenge
+  const codeVerifier = generateCodeVerifier();
+  const codeChallenge = generateCodeChallenge(codeVerifier);
+  
+  // Store state and code_verifier with timestamp (expires in 10 minutes)
+  stateStore.set(state, { 
+    createdAt: Date.now(),
+    codeVerifier: codeVerifier
+  });
   
   // Clean up old states (older than 10 minutes)
   const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
@@ -54,6 +72,8 @@ app.get("/auth/airtable", (req, res) => {
     redirect_uri: AIRTABLE_REDIRECT_URI,
     scope: "data.records:read data.records:write schema.bases:read webhook:manage",
     state: state,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
   });
 
   res.redirect(`${AIRTABLE_AUTH_URL}?${params.toString()}`);
@@ -71,7 +91,9 @@ app.get("/auth/airtable/callback", async (req, res) => {
     return res.status(400).json({ success: false, error: "Invalid state parameter" });
   }
   
-  // Remove used state
+  // Get stored data and remove used state
+  const storedData = stateStore.get(state);
+  const codeVerifier = storedData.codeVerifier;
   stateStore.delete(state);
 
   if (!code) {
@@ -87,6 +109,7 @@ app.get("/auth/airtable/callback", async (req, res) => {
       client_id: AIRTABLE_CLIENT_ID,
       client_secret: AIRTABLE_CLIENT_SECRET,
       redirect_uri: AIRTABLE_REDIRECT_URI,
+      code_verifier: codeVerifier,
     });
 
     const tokenResponse = await axios.post(AIRTABLE_TOKEN_URL, body.toString(), {
