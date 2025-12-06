@@ -1,8 +1,16 @@
-// backend/src/backend.js
+require('dotenv').config();
 const express = require("express");
+const cors = require("cors");
 const axios = require("axios");
 
-const router = express.Router();
+const app = express();
+
+// Middleware
+app.use(express.json());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  credentials: true
+}));
 
 const AIRTABLE_CLIENT_ID = process.env.AIRTABLE_CLIENT_ID;
 const AIRTABLE_CLIENT_SECRET = process.env.AIRTABLE_CLIENT_SECRET;
@@ -12,7 +20,16 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 const AIRTABLE_AUTH_URL = "https://airtable.com/oauth2/v1/authorize";
 const AIRTABLE_TOKEN_URL = "https://airtable.com/oauth2/v1/token";
 
-router.get("/auth/airtable", (req, res) => {
+// Health check
+app.get("/", (req, res) => {
+  res.json({ status: "ok", message: "FormFlow API" });
+});
+
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
+app.get("/auth/airtable", (req, res) => {
   const params = new URLSearchParams({
     client_id: AIRTABLE_CLIENT_ID,
     response_type: "code",
@@ -23,7 +40,7 @@ router.get("/auth/airtable", (req, res) => {
   res.redirect(`${AIRTABLE_AUTH_URL}?${params.toString()}`);
 });
 
-router.get("/auth/airtable/callback", async (req, res) => {
+app.get("/auth/airtable/callback", async (req, res) => {
   const { code, error } = req.query;
 
   if (error) {
@@ -65,7 +82,7 @@ router.get("/auth/airtable/callback", async (req, res) => {
   }
 });
 
-router.post("/webhook/airtable", (req, res) => {
+app.post("/webhook/airtable", (req, res) => {
   const signature = req.header("x-airtable-webhook-signature");
   if (!signature || !WEBHOOK_SECRET) {
     return res.status(401).end();
@@ -74,4 +91,8 @@ router.post("/webhook/airtable", (req, res) => {
   res.status(200).json({ success: true });
 });
 
-module.exports = router;
+// Start server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
