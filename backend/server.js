@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
+const crypto = require("crypto");
 
 const app = express();
 
@@ -20,6 +21,9 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 const AIRTABLE_AUTH_URL = "https://airtable.com/oauth2/v1/authorize";
 const AIRTABLE_TOKEN_URL = "https://airtable.com/oauth2/v1/token";
 
+// Store state tokens temporarily (in production, use Redis or database)
+const stateStore = new Map();
+
 // Health check
 app.get("/", (req, res) => {
   res.json({ status: "ok", message: "FormFlow API" });
@@ -30,22 +34,45 @@ app.get("/health", (req, res) => {
 });
 
 app.get("/auth/airtable", (req, res) => {
+  // Generate random state for CSRF protection
+  const state = crypto.randomBytes(32).toString("hex");
+  
+  // Store state with timestamp (expires in 10 minutes)
+  stateStore.set(state, { createdAt: Date.now() });
+  
+  // Clean up old states (older than 10 minutes)
+  const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+  for (const [key, value] of stateStore.entries()) {
+    if (value.createdAt < tenMinutesAgo) {
+      stateStore.delete(key);
+    }
+  }
+
   const params = new URLSearchParams({
     client_id: AIRTABLE_CLIENT_ID,
     response_type: "code",
     redirect_uri: AIRTABLE_REDIRECT_URI,
     scope: "data.records:read data.records:write schema.bases:read webhook:manage",
+    state: state,
   });
 
   res.redirect(`${AIRTABLE_AUTH_URL}?${params.toString()}`);
 });
 
 app.get("/auth/airtable/callback", async (req, res) => {
-  const { code, error } = req.query;
+  const { code, error, state } = req.query;
 
   if (error) {
     return res.status(400).json({ success: false, error });
   }
+
+  // Verify state parameter
+  if (!state || !stateStore.has(state)) {
+    return res.status(400).json({ success: false, error: "Invalid state parameter" });
+  }
+  
+  // Remove used state
+  stateStore.delete(state);
 
   if (!code) {
     return res
