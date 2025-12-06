@@ -2,10 +2,10 @@
   "name": "airtable-forms-backend",
   "version": "1.0.0",
   "description": "Backend for Airtable-Connected Dynamic Form Builder",
-  "main": "src/server.js",
+  "main": "server.js",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
   "dependencies": {
     "axios": "^1.6.2",
